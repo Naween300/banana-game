@@ -2,8 +2,7 @@ import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 
 // Define protected routes
 const protectedRoutes = createRouteMatcher([
-  '/dashboard(.*)',
-  '/forum(.*)'
+  '/game(.*)' // Protect the game route
 ]);
 
 // Define public routes
@@ -17,12 +16,12 @@ export default clerkMiddleware(async (auth, req) => {
   if (publicRoutes(req)) {
     return; // Allow access to public routes
   }
-  
+
   if (protectedRoutes(req)) {
-    await auth.protect();
+    await auth.protect(); // Enforce authentication for protected routes
   }
-}, {debug: true});
+}, { debug: true });
 
 export const config = {
-  matcher: ["/((?!.*\\..*).*)", "/", "/(api|trpc)(.*)"],
+  matcher: ["/((?!.*\\..*).*)", "/", "/(api|trpc)(.*)"], // Match all necessary routes
 };
