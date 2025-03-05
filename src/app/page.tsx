@@ -1,20 +1,19 @@
 "use client";
 
-import { SignInButton, SignUpButton, useAuth, useUser } from '@clerk/nextjs';
-import Link from 'next/link';
-import { useState, useEffect } from 'react';
+import { SignInButton, SignUpButton, useAuth } from '@clerk/nextjs';
+import { useRouter } from "next/navigation";
+import { useEffect } from "react";
 
 export default function Home() {
-  const { isSignedIn } = useAuth();
-  const { user } = useUser(); // Get current user details
-  const [lobbyUsers, setLobbyUsers] = useState<string[]>([]); // State for lobby users
+  const { isSignedIn } = useAuth(); // Check if the user is signed in
+  const router = useRouter();
 
-  // Simulate fetching all logged-in users (replace this with actual API call if needed)
+  // Redirect to profile-setup if the user is signed in
   useEffect(() => {
-    if (isSignedIn && user) {
-      setLobbyUsers((prev) => [...new Set([...prev, user.firstName || "Player"])]);
+    if (isSignedIn) {
+      router.push("/profile-setup");
     }
-  }, [isSignedIn, user]);
+  }, [isSignedIn, router]);
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-b from-purple-900 to-indigo-900 p-4">
@@ -37,26 +36,7 @@ export default function Home() {
             </button>
           </SignUpButton>
         </div>
-      ) : (
-        <>
-          <div className="mb-8">
-            <h2 className="text-xl text-yellow-300 font-bold">Lobby</h2>
-            <ul className="text-gray-300">
-              {lobbyUsers.map((name, index) => (
-                <li key={index} className="my-2">
-                  {name}
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          <Link href="/game">
-            <button className="px-8 py-3 bg-yellow-500 hover:bg-yellow-600 text-black font-bold rounded-full transition-all">
-              Start Game
-            </button>
-          </Link>
-        </>
-      )}
+      ) : null}
     </div>
   );
 }

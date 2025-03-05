@@ -9,7 +9,8 @@ const protectedRoutes = createRouteMatcher([
 const publicRoutes = createRouteMatcher([
   '/',
   '/sign-in(.*)',
-  '/sign-up(.*)'
+  '/sign-up(.*)',
+  '/profile-setup(.*)' // Allow access to profile setup page
 ]);
 
 export default clerkMiddleware(async (auth, req) => {
