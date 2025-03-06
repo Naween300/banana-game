@@ -10,6 +10,7 @@ const publicRoutes = createRouteMatcher([
   '/',
   '/sign-in(.*)',
   '/sign-up(.*)',
+  '/create-game(.*)',
   '/profile-setup(.*)' // Allow access to profile setup page
 ]);
 
