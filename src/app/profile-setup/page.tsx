@@ -1,27 +1,35 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useUser } from "@clerk/nextjs";
-
-const avatars = [
-  "https://example.com/avatar1.png",
-  "https://example.com/avatar2.png",
-  "https://example.com/avatar3.png",
-  "https://example.com/avatar4.png",
-];
+import axios from "axios";
 
 export default function ProfileSetup() {
   const { user } = useUser(); // Fetch the logged-in user's data
   const [name, setName] = useState(user?.firstName || ""); // Use Clerk's user object to get the name
-  const [avatar, setAvatar] = useState(avatars[0]); // Default avatar
+  const [avatar, setAvatar] = useState(""); // State to store the current avatar URL
   const router = useRouter();
+
+  // Fetch a random avatar on mount
+  useEffect(() => {
+    fetchRandomAvatar();
+  }, []);
+
+  // Function to fetch a random avatar
+  const fetchRandomAvatar = async () => {
+    try {
+      const response = await axios.get("https://api.dicebear.com/7.x/pixel-art/svg?seed=" + Math.random());
+      const avatarUrl = `data:image/svg+xml;utf8,${encodeURIComponent(response.data)}`;
+      setAvatar(avatarUrl);
+    } catch (error) {
+      console.error("Error fetching avatar:", error);
+    }
+  };
 
   // Handle avatar change
   const changeAvatar = () => {
-    const currentIndex = avatars.indexOf(avatar);
-    const nextIndex = (currentIndex + 1) % avatars.length;
-    setAvatar(avatars[nextIndex]);
+    fetchRandomAvatar();
   };
 
   // Handle form submission
@@ -41,12 +49,16 @@ export default function ProfileSetup() {
       <div className="flex flex-col items-center gap-4">
         {/* Avatar Selection */}
         <div className="relative">
-          <img
-            src={avatar}
-            alt="Selected Avatar"
-            className="w-24 h-24 rounded-full border-4 border-white cursor-pointer"
-            onClick={changeAvatar}
-          />
+          {avatar ? (
+            <img
+              src={avatar}
+              alt="Selected Avatar"
+              className="w-24 h-24 rounded-full border-4 border-white cursor-pointer"
+              onClick={changeAvatar}
+            />
+          ) : (
+            <p>Loading Avatar...</p>
+          )}
           <p className="text-sm text-white mt-2">Tap to change!</p>
         </div>
 
