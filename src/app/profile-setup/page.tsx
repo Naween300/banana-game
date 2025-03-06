@@ -7,7 +7,7 @@ import axios from "axios";
 
 export default function ProfileSetup() {
   const { user } = useUser(); // Fetch the logged-in user's data
-  const [name, setName] = useState(user?.firstName || ""); // Use Clerk's user object to get the name
+  const [name, setName] = useState(""); // State to store the user's preferred gaming name
   const [avatar, setAvatar] = useState(""); // State to store the current avatar URL
   const router = useRouter();
 
@@ -65,7 +65,7 @@ export default function ProfileSetup() {
         {/* Name Input */}
         <input
           type="text"
-          placeholder="Enter Name"
+          placeholder="Enter Your Gaming Name"
           value={name}
           onChange={(e) => setName(e.target.value)}
           className="px-4 py-2 rounded-full border border-gray-300 focus:outline-none focus:ring-2 focus:ring-yellow-400"
