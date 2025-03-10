@@ -28,6 +28,8 @@ export default function ProfileSetup() {
       setAvatar(avatarUrl);
     } catch (error) {
       console.error("Error fetching avatar:", error);
+      // Provide a fallback avatar in case of error
+      setAvatar("https://api.dicebear.com/7.x/pixel-art/svg");
     } finally {
       setIsLoading(false);
     }
@@ -45,12 +47,15 @@ export default function ProfileSetup() {
       return;
     }
 
-    // Include the lobby code in the redirect if it exists
+    // Construct the URL with all necessary parameters
+    let redirectUrl = `/lobby?name=${encodeURIComponent(name)}&avatar=${encodeURIComponent(avatar)}`;
+    
+    // Add code parameter if it exists to ensure user joins the correct lobby
     if (lobbyCode) {
-      router.push(`/lobby?name=${encodeURIComponent(name)}&avatar=${encodeURIComponent(avatar)}&code=${lobbyCode}`);
-    } else {
-      router.push(`/lobby?name=${encodeURIComponent(name)}&avatar=${encodeURIComponent(avatar)}`);
+      redirectUrl += `&code=${lobbyCode}`;
     }
+    
+    router.push(redirectUrl);
   };
 
   return (
