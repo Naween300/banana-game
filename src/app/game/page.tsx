@@ -1,17 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { fetchBananaPuzzle } from "@/services/bananaApi";
 
 type Player = {
   username: string;
   avatar: string;
   points?: number;
+  rank?: number;
 };
 
 type PuzzleData = {
-  question: "https://marcconrad.com/uob/banana/api.php";
+  question: string;
   solution: number;
 };
 
@@ -24,11 +25,25 @@ export default function GamePage() {
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
   const [score, setScore] = useState(0);
   const [round, setRound] = useState(1);
+  const [socket, setSocket] = useState<WebSocket | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
+  const [myUserId, setMyUserId] = useState<string>(""); // Added to store the player's userId
+  
+  const router = useRouter();
   const searchParams = useSearchParams();
+  
   const username = searchParams.get("name") || "Player";
+  const avatar = searchParams.get("avatar") || "https://example.com/default-avatar.png";
   const lobbyCode = searchParams.get("code");
 
-  // Generate 4 options with one being the correct answer
+  // Add redirect if lobby code is missing
+  useEffect(() => {
+    if (!lobbyCode || !username || !avatar) {
+      alert("Missing required parameters! Redirecting to home...");
+      router.push("/");
+    }
+  }, [lobbyCode, username, avatar, router]);
+
   const generateOptions = (solution: number): number[] => {
     const options = [solution];
     while (options.length < 4) {
@@ -37,12 +52,10 @@ export default function GamePage() {
         options.push(randomOption);
       }
     }
-    return options.sort(() => Math.random() - 0.5); // Shuffle options
+    return options.sort(() => Math.random() - 0.5);
   };
 
   const [options, setOptions] = useState<number[]>([]);
-
-  // Load a new puzzle
   const loadPuzzle = async () => {
     setLoading(true);
     setSelectedAnswer(null);
@@ -60,82 +73,127 @@ export default function GamePage() {
     }
   };
 
-  // Handle answer selection
   const handleAnswerSelect = (answer: number) => {
-    if (selectedAnswer !== null || timeLeft <= 0 || !puzzle) return;
+    if (selectedAnswer !== null || timeLeft <= 0 || !puzzle || !lobbyCode) return;
     
     setSelectedAnswer(answer);
     const correct = answer === puzzle.solution;
     setIsCorrect(correct);
     
     if (correct) {
-      // Calculate points based on time left (faster = more points)
       const points = Math.max(5, timeLeft) * 10;
-      setScore(prevScore => prevScore + points);
+      const newScore = score + points;
+      setScore(newScore);
       
-      // Send score update to server
-      if (socket && socket.readyState === WebSocket.OPEN) {
+      if (socket && socket.readyState === WebSocket.OPEN && myUserId) {
         socket.send(JSON.stringify({
           type: "update_points",
-          username,
+          userId: myUserId, // Use stored userId instead of username
           lobbyCode,
-          points: score + points
+          points: points
         }));
+        console.log(`Sent score update with userId: ${myUserId}, points: ${points}`);
+      } else {
+        console.warn("Cannot send score update: WebSocket not connected or userId not set");
       }
     }
     
-    // Load next puzzle after delay
     setTimeout(() => {
-      setRound(prevRound => prevRound + 1);
+      setRound(prev => prev + 1);
       loadPuzzle();
     }, 2000);
   };
 
-  // WebSocket connection
-  const [socket, setSocket] = useState<WebSocket | null>(null);
-
+  // Initialize WebSocket with reconnection logic
   useEffect(() => {
-    const newSocket = new WebSocket("ws://localhost:8080");
-    setSocket(newSocket);
-
-    newSocket.onopen = () => {
-      console.log("Connected to game server");
-    };
-
-    newSocket.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
+    let reconnectAttempts = 0;
+    const maxReconnectAttempts = 5;
+    let reconnectTimer: NodeJS.Timeout | null = null;
+    
+    function connectWebSocket() {
+      setConnectionStatus('connecting');
+      console.log("Connecting to WebSocket server...");
+      
+      const newSocket = new WebSocket("ws://localhost:8080");
+      setSocket(newSocket);
+    
+      newSocket.onopen = () => {
+        console.log("WebSocket connection established");
+        setConnectionStatus('connected');
+        reconnectAttempts = 0;
         
-        if (data.type === "leaderboard_update" || data.type === "update_lobby") {
-          if (Array.isArray(data.players)) {
-            const formattedPlayers = data.players.map((player: Player) => ({
-              username: player.username || "Unknown",
-              avatar: player.avatar || "https://example.com/default-avatar.png",
-              points: typeof player.points === 'number' ? player.points : 0
-            }));
-            
-            // Sort players by points (highest first)
-            formattedPlayers.sort((a: Player, b: Player) => (b.points || 0) - (a.points || 0));
-
-            setPlayers(formattedPlayers);
-          }
+        // Join the game
+        if (lobbyCode) {
+          newSocket.send(JSON.stringify({
+            type: "join_game",
+            lobbyCode,
+            username,
+            avatar
+          }));
+          console.log(`Sent join_game message for lobby ${lobbyCode}`);
         }
-      } catch (error) {
-        console.error("Error processing message:", error);
+      };
+    
+      newSocket.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          console.log("Received message:", data);
+          
+          if (data.type === "joined_game") {
+            // Store the userId assigned by the server
+            setMyUserId(data.userId);
+            console.log(`Received userId from server: ${data.userId}`);
+          } else if (data.type === "leaderboard_update") {
+            console.log("Updating leaderboard with:", data.leaderboard || []);
+            setPlayers(data.leaderboard || []);
+          } else if (data.type === "error") {
+            console.error("Server error:", data.message);
+          }
+        } catch (error) {
+          console.error("Error processing message:", error);
+        }
+      };
+      
+      newSocket.onclose = (event) => {
+        console.log("WebSocket connection closed:", event);
+        setConnectionStatus('disconnected');
+        
+        if (reconnectAttempts < maxReconnectAttempts) {
+          reconnectAttempts++;
+          console.log(`Attempting to reconnect (${reconnectAttempts}/${maxReconnectAttempts})...`);
+          
+          // Exponential backoff for reconnection attempts
+          const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000);
+          reconnectTimer = setTimeout(connectWebSocket, delay);
+        } else {
+          console.error("Max reconnection attempts reached");
+        }
+      };
+      
+      newSocket.onerror = (error) => {
+        console.error("WebSocket error:", error);
+      };
+    }
+    
+    connectWebSocket();
+    
+    return () => {
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+      }
+      
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.close();
       }
     };
-
-    return () => {
-      if (newSocket) newSocket.close();
-    };
-  }, []);
+  }, [lobbyCode, username, avatar]);
 
   // Load initial puzzle
   useEffect(() => {
     loadPuzzle();
   }, []);
 
-  // Timer countdown
+  // Timer effect
   useEffect(() => {
     if (loading || selectedAnswer !== null || timeLeft <= 0) return;
 
@@ -143,14 +201,11 @@ export default function GamePage() {
       setTimeLeft(prev => {
         if (prev <= 1) {
           clearInterval(timer);
-          setSelectedAnswer(-1); // Timeout
-          
-          // Load next puzzle after delay
+          setSelectedAnswer(-1);
           setTimeout(() => {
-            setRound(prevRound => prevRound + 1);
+            setRound(prev => prev + 1);
             loadPuzzle();
           }, 2000);
-          
           return 0;
         }
         return prev - 1;
@@ -159,7 +214,6 @@ export default function GamePage() {
 
     return () => clearInterval(timer);
   }, [loading, selectedAnswer, timeLeft]);
-
   return (
     <div className="flex min-h-screen">
       {/* Main Game Section */}
@@ -179,6 +233,13 @@ export default function GamePage() {
               }`}>
                 {timeLeft}
               </div>
+              
+              {/* Connection status indicator */}
+              <div className={`h-3 w-3 rounded-full ${
+                connectionStatus === 'connected' ? 'bg-green-500' : 
+                connectionStatus === 'connecting' ? 'bg-yellow-500 animate-pulse' : 
+                'bg-red-500'
+              }`} title={`Status: ${connectionStatus}`} />
             </div>
           </div>
 
@@ -195,10 +256,7 @@ export default function GamePage() {
             <div className="bg-white rounded-xl shadow-xl overflow-hidden">
               <div className="p-4 bg-purple-800 text-white text-center font-bold text-xl">
                 Solve the Banana Puzzle
-              
-
               </div>
-              
               
               {puzzle && (
                 <div className="p-6">
@@ -241,8 +299,8 @@ export default function GamePage() {
                       {isCorrect 
                         ? `Correct! +${Math.max(5, timeLeft) * 10} points` 
                         : selectedAnswer === -1 
-                          ? `Time's up! The correct answer was ${puzzle?.solution ?? 'unknown'}`
-                          : `Wrong! The correct answer was ${puzzle?.solution ?? 'unknown'}`
+                          ? `Time's up! The correct answer was ${puzzle.solution}`
+                          : `Wrong! The correct answer was ${puzzle.solution}`
                       }
                     </div>
                   )}
@@ -253,7 +311,61 @@ export default function GamePage() {
         </div>
       </div>
 
-      
+      {/* Leaderboard Sidebar */}
+      <div className="w-96 bg-white/20 backdrop-blur-lg p-6 border-l border-white/30">
+        <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-2">
+          <span>🏆</span> Live Leaderboard
+        </h2>
+        
+        {players.length === 0 ? (
+          <div className="text-white text-center p-4 bg-white/10 rounded-xl">
+            {connectionStatus === 'connected' 
+              ? "Waiting for players to join..." 
+              : "Connecting to game server..."}
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {players.map((player, index) => (
+              <div 
+                key={player.username || index}
+                className={`flex items-center p-4 rounded-xl transition-all duration-300 ${
+                  player.username === username
+                    ? 'bg-purple-600/30 backdrop-blur-md shadow-lg border-2 border-purple-400'
+                    : 'bg-white/10 hover:bg-white/20'
+                }`}
+              >
+                <div className="flex items-center flex-1 gap-4">
+                  <div className="w-8 h-8 flex items-center justify-center rounded-full bg-white/20 font-bold">
+                    {player.rank || index + 1}
+                  </div>
+
+                  <img
+                    src={player.avatar}
+                    alt={player.username}
+                    className="w-10 h-10 rounded-full border-2 border-yellow-400"
+                  />
+
+                  <div className="flex-1 min-w-0">
+                    <div className="flex justify-between mb-1">
+                      <span className="font-semibold truncate">{player.username}</span>
+                      <span className="font-mono">{player.points || 0} pts</span>
+                    </div>
+                    
+                    <div className="h-2 bg-white/10 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-gradient-to-r from-yellow-400 to-orange-500 transition-all duration-500"
+                        style={{ 
+                          width: `${Math.min((player.points || 0) / (players[0]?.points || 1) * 100, 100)}%`
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

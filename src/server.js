@@ -2,6 +2,8 @@ const WebSocket = require('ws');
 const { v4: uuidv4 } = require('uuid');
 const QRCode = require('qrcode');
 const http = require('http');
+const Redis = require('ioredis');
+const redis = new Redis(process.env.REDIS_URL);
 
 // Create HTTP server with proper CORS headers
 const server = http.createServer((req, res) => {
@@ -40,6 +42,10 @@ function generateLobbyCode() {
   return Math.floor(10000 + Math.random() * 90000).toString();
 }
 
+// Leaderboard caching and rate limiting
+const leaderboardCache = new Map();
+const rateLimiter = new Map();
+
 wss.on('error', (error) => {
   console.error('WebSocket server error:', error);
 });
@@ -54,6 +60,17 @@ wss.on('connection', (ws, req) => {
     ws.isAlive = true;
   });
 
+  // Interval to check client connections
+  const interval = setInterval(() => {
+    if (!ws.isAlive) {
+      console.log('Terminating inactive connection');
+      return ws.terminate();
+    }
+    
+    ws.isAlive = false;
+    ws.ping();
+  }, 30000);
+
   ws.on('message', (message) => {
     try {
       // Handle binary message if needed
@@ -67,6 +84,9 @@ wss.on('connection', (ws, req) => {
           break;
         case 'join_lobby':
           handleJoinLobby(ws, data);
+          break;
+        case 'join_game':  
+          handleJoinGame(ws, data);
           break;
         case 'start_game':
           handleStartGame(data.lobbyCode);
@@ -91,68 +111,64 @@ wss.on('connection', (ws, req) => {
     }
   });
 
+  // Handle connection close
   ws.on('close', (code, reason) => {
+    clearInterval(interval);
     console.log(`Client disconnected. Code: ${code}, Reason: ${reason || 'No reason provided'}`);
     
     // Remove player from all lobbies
     for (const lobbyCode in lobbies) {
       const lobby = lobbies[lobbyCode];
       const previousPlayerCount = lobby.players.length;
-      
+  
+      // Remove the disconnected player
       lobby.players = lobby.players.filter(player => player.ws.id !== ws.id);
-      
-      // If player was removed
+  
       if (previousPlayerCount > lobby.players.length) {
         // If admin left, assign a new admin or delete the lobby
-        if (lobby.admin && lobby.admin.ws.id === ws.id) {
-          if (lobby.players.length > 0) {
-            lobby.admin = lobby.players[0];
-            console.log(`New admin assigned in lobby ${lobbyCode}: ${lobby.admin.username}`);
-          } else {
-            console.log(`Deleting empty lobby ${lobbyCode}`);
-            delete lobbies[lobbyCode];
-            continue;
-          }
-        }
-        
+        // If admin left, assign a new admin or delete the lobby
+if (lobby.admin.ws.id === ws.id) {
+  if (lobby.players.length > 0) {
+    lobby.admin = lobby.players[0];
+    console.log(`New admin assigned in lobby ${lobbyCode}: ${lobby.admin.username}`);
+  } else if (!lobby.gameInProgress) {
+    // Only delete the lobby if the game is not in progress
+    console.log(`Deleting empty lobby ${lobbyCode}`);
+    delete lobbies[lobbyCode];
+    continue;
+  } else {
+    console.log(`Keeping empty lobby ${lobbyCode} because game is in progress`);
+  }
+}
+
+  
         broadcastLobbyUpdate(lobbyCode);
       }
     }
-    
-    // Clear any intervals associated with this connection
-    if (ws.pingInterval) {
-      clearInterval(ws.pingInterval);
-    }
   });
 
+  // Handle connection errors
   ws.on('error', (error) => {
     console.error('WebSocket connection error:', error);
   });
-
-  // Individual keep-alive mechanism for this connection
-  ws.pingInterval = setInterval(() => {
-    if (ws.isAlive === false) {
-      console.log('Terminating inactive connection');
-      return ws.terminate();
-    }
-    
-    ws.isAlive = false;
-    ws.ping();
-  }, 30000);
 });
-
 function handleCreateLobby(ws, data) {
   try {
     const lobbyCode = generateLobbyCode();
     const player = {
       ws,
+      userId: uuidv4(),
       username: data.username || 'Anonymous',
       avatar: data.avatar || 'https://example.com/default-avatar.png',
       points: 0,
-      ready: false
+      ready: false,
+      sessionToken: uuidv4()
     };
-    
-    // Create new lobby with this player as admin
+
+    const domain = process.env.APP_DOMAIN || 'localhost:3000';
+    const joinUrl = `http://${domain}/game?code=${lobbyCode}&name=${encodeURIComponent(player.username)}&avatar=${encodeURIComponent(player.avatar)}`;
+
+    // Create lobby entry
     lobbies[lobbyCode] = {
       code: lobbyCode,
       admin: player,
@@ -160,37 +176,35 @@ function handleCreateLobby(ws, data) {
       gameInProgress: false,
       createdAt: new Date()
     };
-    
+
     console.log(`Lobby created with code: ${lobbyCode}`);
-    
-    // Generate QR code with the actual domain from environment or config
-    const domain = process.env.APP_DOMAIN || 'localhost:3000';
-    QRCode.toDataURL(`http://${domain}/join?code=${lobbyCode}`, (err, url) => {
+
+    QRCode.toDataURL(joinUrl, (err, url) => {
       if (err) {
         console.error('Error generating QR code:', err);
-        // Send lobby info without QR code
         ws.send(JSON.stringify({
           type: 'lobby_created',
           lobbyCode,
-          isAdmin: true
+          joinUrl,
+          error: 'QR code generation failed'
         }));
       } else {
-        // Send lobby info with QR code
         ws.send(JSON.stringify({
           type: 'lobby_created',
           lobbyCode,
-          qrCode: url,
-          isAdmin: true
+          joinUrl,
+          qrCode: url
         }));
       }
-      
+
       broadcastLobbyUpdate(lobbyCode);
     });
   } catch (error) {
     console.error('Error creating lobby:', error);
     ws.send(JSON.stringify({
       type: 'error',
-      message: 'Failed to create lobby'
+      message: 'Failed to create lobby',
+      details: error.message
     }));
   }
 }
@@ -224,30 +238,42 @@ function handleJoinLobby(ws, data) {
       p => p.username === username
     );
     
+    let isAdmin = false;
+    let userId = '';
+    
     if (existingPlayerIndex !== -1) {
       // Update existing player's connection
       lobby.players[existingPlayerIndex].ws = ws;
       lobby.players[existingPlayerIndex].avatar = avatar || lobby.players[existingPlayerIndex].avatar;
+      
+      // Check if this player is the admin
+      isAdmin = lobby.admin.username === username;
+      userId = lobby.players[existingPlayerIndex].userId;
     } else {
       // Add new player
       const newPlayer = { 
         ws,
+        userId: uuidv4(),
         username: username || 'Anonymous',
         avatar: avatar || 'https://example.com/default-avatar.png',
         points: 0,
         ready: false
       };
       lobby.players.push(newPlayer);
+      
+      // Check if this player is the admin
+      isAdmin = lobby.admin.username === username;
+      userId = newPlayer.userId;
     }
     
-    console.log(`Player joined lobby ${lobbyCode}: ${username}`);
+    console.log(`Player joined lobby ${lobbyCode}: ${username} (isAdmin: ${isAdmin}, userId: ${userId})`);
     
     // Tell the player if they're admin
-    const isAdmin = lobby.admin && lobby.admin.ws.id === ws.id;
     ws.send(JSON.stringify({
       type: 'joined_lobby',
       lobbyCode,
-      isAdmin
+      isAdmin,
+      userId // Send userId to client
     }));
     
     broadcastLobbyUpdate(lobbyCode);
@@ -256,6 +282,71 @@ function handleJoinLobby(ws, data) {
     ws.send(JSON.stringify({
       type: 'error',
       message: 'Failed to join lobby'
+    }));
+  }
+}
+
+function handleJoinGame(ws, data) {
+  try {
+    const { lobbyCode, username, avatar } = data;
+    
+    console.log(`Attempting to join game with code: ${lobbyCode}`);
+    console.log(`Available lobbies: ${Object.keys(lobbies).join(', ')}`);
+    
+    // Check if lobby exists
+    if (!lobbies[lobbyCode]) {
+      console.log(`Lobby ${lobbyCode} not found in available lobbies`);
+      ws.send(JSON.stringify({
+        type: 'error',
+        message: 'Lobby not found'
+      }));
+      return;
+    }
+    
+    const lobby = lobbies[lobbyCode];
+    
+    // Find existing player by username
+    const existingPlayerIndex = lobby.players.findIndex(
+      p => p.username === username
+    );
+    
+    let userId = '';
+    
+    if (existingPlayerIndex !== -1) {
+      // Update existing player's connection
+      lobby.players[existingPlayerIndex].ws = ws;
+      ws.id = lobby.players[existingPlayerIndex].userId; // Preserve the user ID
+      userId = lobby.players[existingPlayerIndex].userId;
+    } else {
+      // Add new player
+      userId = uuidv4();
+      const newPlayer = { 
+        ws,
+        userId,
+        username: username || 'Anonymous',
+        avatar: avatar || 'https://example.com/default-avatar.png',
+        points: 0
+      };
+      lobby.players.push(newPlayer);
+      ws.id = userId;
+    }
+    
+    console.log(`Player joined game ${lobbyCode}: ${username} (userId: ${userId})`);
+    
+    // Send userId to client
+    ws.send(JSON.stringify({
+      type: 'joined_game',
+      userId,
+      lobbyCode
+    }));
+    
+    // Send current leaderboard immediately
+    broadcastLeaderboardUpdate(lobbyCode);
+  } catch (error) {
+    console.error('Error joining game:', error);
+    ws.send(JSON.stringify({
+      type: 'error',
+      message: 'Failed to join game'
     }));
   }
 }
@@ -274,6 +365,7 @@ function handleStartGame(lobbyCode) {
     
     broadcast(lobbyCode, {
       type: 'game_started',
+      lobbyCode: lobbyCode, // Include the code in the message
       players: lobby.players.map(p => ({
         username: p.username,
         avatar: p.avatar,
@@ -284,27 +376,152 @@ function handleStartGame(lobbyCode) {
     console.error('Error starting game:', error);
   }
 }
-
-function handleUpdatePoints(data) {
+async function handleUpdatePoints(data) {
   try {
-    const { lobbyCode, username, points } = data;
-    if (!lobbies[lobbyCode]) {
-      console.error(`Cannot update points: Lobby ${lobbyCode} not found`);
-      return;
+    // Validate input structure
+    if (!data?.lobbyCode || !data?.userId || typeof data?.points !== 'number') {
+      throw new Error('Invalid score update request format');
     }
+
+    const { lobbyCode, userId, points } = data;
     
+    console.log(`Updating points for user ${userId} in lobby ${lobbyCode}: +${points} points`);
+    
+    // Enhanced rate limiting with time window
+    const now = Date.now();
+    const userKey = `${lobbyCode}:${userId}`;
+    const windowSize = 1000; // 1 second window
+    
+    const requests = (rateLimiter.get(userKey) || []).filter(
+      ts => ts > now - windowSize
+    );
+    
+    if (requests.length >= 10) {
+      throw new Error('Rate limit exceeded (10 requests/sec)');
+    }
+    rateLimiter.set(userKey, [...requests, now]);
+
+    // Validate lobby existence
     const lobby = lobbies[lobbyCode];
-    const player = lobby.players.find(p => p.username === username);
+    if (!lobby) {
+      throw new Error(`Lobby ${lobbyCode} not found`);
+    }
+
+    // Get player details
+    const player = lobby.players.find(p => p.userId === userId);
+    if (!player) {
+      console.error(`Player with userId ${userId} not found in lobby ${lobbyCode}`);
+      console.log(`Available players: ${lobby.players.map(p => `${p.username} (${p.userId})`).join(', ')}`);
+      throw new Error(`Player ${userId} not found in lobby ${lobbyCode}`);
+    }
+
+    // Update player's points in memory
+    player.points = (player.points || 0) + points;
+    console.log(`Updated points for ${player.username}: ${player.points}`);
+
+    // Redis transaction setup
+    const scoreKey = `leaderboard:${lobbyCode}`;
+    const hourlyKey = `${scoreKey}:hourly:${Math.floor(Date.now()/3600000)}`;
+    const dailyKey = `${scoreKey}:daily:${Math.floor(Date.now()/86400000)}`;
+
+    const multi = redis.multi()
+      .zincrby(scoreKey, points, userId)
+      .zincrby(hourlyKey, points, userId)
+      .zincrby(dailyKey, points, userId);
+
+    // Execute transaction
+    const results = await multi.exec();
+    if (results.some(res => res[0])) {
+      throw new Error('Redis transaction failed');
+    }
+
+    // Get updated leaderboards
+    const [main, hourly, daily] = await Promise.all([
+      redis.zrevrange(scoreKey, 0, 9, 'WITHSCORES'),
+      redis.zrevrange(hourlyKey, 0, 9, 'WITHSCORES'),
+      redis.zrevrange(dailyKey, 0, 9, 'WITHSCORES')
+    ]);
+
+    // Process main leaderboard
+    const processedPlayers = {};
+    for (let i = 0; i < main.length; i += 2) {
+      const id = main[i];
+      const score = main[i+1];
+      const index = i/2;
+      
+      const playerInfo = lobby.players.find(p => p.userId === id) || {
+        username: 'Unknown',
+        avatar: 'https://example.com/default-avatar.png'
+      };
+      
+      processedPlayers[id] = {
+        ...playerInfo,
+        points: parseInt(score),
+        rank: index + 1,
+        previousRank: leaderboardCache.get(scoreKey)?.[id]?.rank || null
+      };
+    }
+
+    // Calculate deltas
+    const deltas = Object.values(processedPlayers)
+      .filter(p => p.previousRank !== null && p.previousRank !== p.rank)
+      .map(p => ({
+        userId: p.userId,
+        username: p.username,
+        avatar: p.avatar,
+        currentRank: p.rank,
+        previousRank: p.previousRank,
+        points: p.points
+      }));
+
+    // Update cache and broadcast
+    leaderboardCache.set(scoreKey, processedPlayers);
     
-    if (player) {
-      player.points = points;
+    // If Redis has no entries yet, use the in-memory data
+    if (Object.keys(processedPlayers).length === 0) {
       broadcastLeaderboardUpdate(lobbyCode);
     } else {
-      console.error(`Player ${username} not found in lobby ${lobbyCode}`);
+      broadcast(lobbyCode, {
+        type: 'leaderboard_update',
+        leaderboard: Object.values(processedPlayers),
+        deltas,
+        hourly: processLeaderboard(hourly, lobby),
+        daily: processLeaderboard(daily, lobby)
+      });
     }
+
   } catch (error) {
-    console.error('Error updating points:', error);
+    console.error('Leaderboard Error:', error);
+    broadcast(data.lobbyCode, {
+      type: 'error',
+      code: 'LB_UPDATE_FAILED',
+      message: error.message,
+      userId: data.userId,
+      timestamp: Date.now()
+    });
   }
+}
+
+// Helper function
+function processLeaderboard(data, lobby) {
+  const result = [];
+  for (let i = 0; i < data.length; i += 2) {
+    const id = data[i];
+    const score = data[i+1];
+    const index = i/2;
+    
+    const player = lobby.players.find(p => p.userId === id) || {
+      username: 'Unknown',
+      avatar: 'https://example.com/default-avatar.png'
+    };
+    
+    result.push({
+      ...player,
+      points: parseInt(score),
+      rank: index + 1
+    });
+  }
+  return result;
 }
 
 function broadcastLobbyUpdate(lobbyCode) {
@@ -342,12 +559,18 @@ function broadcastLeaderboardUpdate(lobbyCode) {
     }
     
     const lobby = lobbies[lobbyCode];
+    const sortedPlayers = [...lobby.players].sort((a, b) => (b.points || 0) - (a.points || 0));
+    
+    console.log(`Broadcasting leaderboard for ${lobbyCode} with ${sortedPlayers.length} players`);
+    
     broadcast(lobbyCode, {
       type: 'leaderboard_update',
-      players: lobby.players.map(p => ({
-        username: p.username,
-        avatar: p.avatar,
-        points: p.points
+      leaderboard: sortedPlayers.map((player, index) => ({
+        userId: player.userId,
+        username: player.username,
+        avatar: player.avatar,
+        points: player.points || 0,
+        rank: index + 1
       }))
     });
   } catch (error) {

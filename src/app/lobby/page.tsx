@@ -65,10 +65,12 @@ export default function LobbyPage() {
 
       switch (data.type) {
         case "lobby_created":
-          setLobbyCode(data.lobbyCode);
-          setQrCode(data.qrCode);
-          setIsAdmin(data.isAdmin);
-          break;
+  setLobbyCode(data.lobbyCode);
+  setQrCode(data.qrCode);
+  setIsAdmin(true); // Explicitly set to true for lobby creator
+  console.log("Set isAdmin to true for lobby creator");
+  break;
+
         
         case "joined_lobby":
           setLobbyCode(data.lobbyCode);
@@ -80,9 +82,12 @@ export default function LobbyPage() {
           setAdminUsername(data.adminUsername);
           break;
           
-        case "game_started":
-          router.push(`/game?code=${lobbyCode}`);
-          break;
+          case "game_started":
+  console.log("Game started with code:", data.lobbyCode);
+  router.push(`/game?code=${data.lobbyCode}&name=${encodeURIComponent(username)}&avatar=${encodeURIComponent(avatar)}`);
+  break;
+
+          
           
         case "error":
           alert(data.message);
@@ -129,7 +134,8 @@ export default function LobbyPage() {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
-  
+  console.log("isAdmin state:", isAdmin);
+
 
   // Loading screen while connecting
   if (isConnecting) {
