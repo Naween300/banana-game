@@ -36,6 +36,13 @@ export default function GamePage() {
   const avatar = searchParams.get("avatar") || "https://example.com/default-avatar.png";
   const lobbyCode = searchParams.get("code");
 
+  const [gameEnded, setGameEnded] = useState(false);
+  const [winner, setWinner] = useState<Player | null>(null);
+  const [finalLeaderboard, setFinalLeaderboard] = useState<Player[]>([]);
+  const [totalRounds, setTotalRounds] = useState(12);
+  const [gameProgress, setGameProgress] = useState(0);
+
+
   // Add redirect if lobby code is missing
   useEffect(() => {
     if (!lobbyCode || !username || !avatar) {
@@ -149,6 +156,14 @@ export default function GamePage() {
           } else if (data.type === "error") {
             console.error("Server error:", data.message);
           }
+          else if (data.type === "game_ended") {
+            // Handle game ended message
+            const { winner, leaderboard } = data;
+            setGameEnded(true);
+            setWinner(winner);
+            setFinalLeaderboard(leaderboard);
+          }
+          
         } catch (error) {
           console.error("Error processing message:", error);
         }
@@ -194,26 +209,27 @@ export default function GamePage() {
   }, []);
 
   // Timer effect
-  useEffect(() => {
-    if (loading || selectedAnswer !== null || timeLeft <= 0) return;
+useEffect(() => {
+  if (loading || selectedAnswer !== null || timeLeft <= 0 || gameEnded) return;
 
-    const timer = setInterval(() => {
-      setTimeLeft(prev => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          setSelectedAnswer(-1);
-          setTimeout(() => {
-            setRound(prev => prev + 1);
-            loadPuzzle();
-          }, 2000);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
+  const timer = setInterval(() => {
+    setTimeLeft(prev => {
+      if (prev <= 1) {
+        clearInterval(timer);
+        setSelectedAnswer(-1);
+        setTimeout(() => {
+          setRound(prev => prev + 1);
+          loadPuzzle();
+        }, 2000);
+        return 0;
+      }
+      return prev - 1;
+    });
+  }, 1000);
 
-    return () => clearInterval(timer);
-  }, [loading, selectedAnswer, timeLeft]);
+  return () => clearInterval(timer);
+}, [loading, selectedAnswer, timeLeft, gameEnded]);
+
   return (
     <div className="flex min-h-screen">
       {/* Main Game Section */}
@@ -223,8 +239,9 @@ export default function GamePage() {
             <h1 className="text-4xl font-bold text-white">Banana Puzzle Game</h1>
             <div className="flex items-center gap-4">
               <div className="bg-white/20 backdrop-blur-lg rounded-full px-4 py-2">
-                <span className="text-white font-bold">Round: {round}</span>
+                <span className="text-white font-bold">Round: {round} of {totalRounds}</span>
               </div>
+              
               <div className="bg-white/20 backdrop-blur-lg rounded-full px-4 py-2">
                 <span className="text-white font-bold">Score: {score}</span>
               </div>
@@ -233,6 +250,7 @@ export default function GamePage() {
               }`}>
                 {timeLeft}
               </div>
+              
               
               {/* Connection status indicator */}
               <div className={`h-3 w-3 rounded-full ${
@@ -274,7 +292,7 @@ export default function GamePage() {
                       <button
                         key={index}
                         onClick={() => handleAnswerSelect(option)}
-                        disabled={selectedAnswer !== null}
+                        disabled={selectedAnswer !== null || gameEnded}
                         className={`p-6 text-2xl font-bold rounded-xl transition-all ${
                           selectedAnswer === null
                             ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600 transform hover:scale-105'
@@ -366,6 +384,84 @@ export default function GamePage() {
           </div>
         )}
       </div>
+      {/* Game Over Modal */}
+{gameEnded && (
+  <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
+    <div className="bg-gradient-to-b from-purple-600 to-pink-500 rounded-3xl p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+      <h1 className="text-4xl font-bold text-white mb-6 text-center">Game Over!</h1>
+      
+      <div className="flex flex-col items-center mb-8">
+        <div className="relative mb-4">
+          <img 
+            src={winner?.avatar} 
+            alt={winner?.username} 
+            className="w-24 h-24 rounded-full border-4 border-yellow-400"
+          />
+          <div className="absolute -top-3 -right-3 bg-yellow-400 text-black rounded-full w-10 h-10 flex items-center justify-center font-bold text-xl">
+            👑
+          </div>
+        </div>
+        <p className="text-xl text-yellow-300 font-bold">{winner?.username}</p>
+        <p className="text-lg text-white">{winner?.points} points</p>
+      </div>
+      
+      <h2 className="text-2xl font-bold text-white mb-4 text-center">Final Leaderboard</h2>
+      <div className="space-y-3 mb-8">
+        {finalLeaderboard.map((player, index) => (
+          <div 
+            key={index}
+            className={`flex items-center p-3 rounded-xl transition-all ${
+              player.username === winner?.username
+                ? 'bg-yellow-500/30 backdrop-blur-md shadow-lg border-2 border-yellow-400'
+                : 'bg-white/10'
+            }`}
+          >
+            <div className="flex items-center flex-1 gap-3">
+              <div className="w-8 h-8 flex items-center justify-center rounded-full bg-white/20 font-bold">
+                {index + 1}
+              </div>
+
+              <img
+                src={player.avatar}
+                alt={player.username}
+                className="w-10 h-10 rounded-full border-2 border-yellow-400"
+              />
+
+              <div className="flex-1 min-w-0">
+                <div className="flex justify-between mb-1">
+                  <span className="font-semibold truncate">{player.username}</span>
+                  <span className="font-mono">{player.points} pts</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      
+      <div className="flex flex-col sm:flex-row gap-4 justify-center">
+        <button 
+          onClick={() => router.push('/')}
+          className="px-6 py-3 bg-white text-purple-600 font-bold rounded-full hover:bg-gray-100 transition"
+        >
+          Return Home
+        </button>
+        <button 
+          onClick={() => {
+            setGameEnded(false);
+            setScore(0);
+            setRound(1);
+            loadPuzzle();
+          }}
+          className="px-6 py-3 bg-green-500 text-white font-bold rounded-full hover:bg-green-600 transition"
+        >
+          Play Again
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+
+
     </div>
   );
 }

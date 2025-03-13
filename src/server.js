@@ -372,10 +372,20 @@ function handleStartGame(lobbyCode) {
         points: p.points
       }))
     });
+
+    // Set timer to end the game after a specified duration
+    const gameDuration = 2 * 60 * 1000; // 10 minutes
+    const gameTimer = setTimeout(() => {
+      endGame(lobbyCode);
+    }, gameDuration);
+    
+    // Store the timer to clear it if needed
+    lobby.gameTimer = gameTimer;
   } catch (error) {
     console.error('Error starting game:', error);
   }
 }
+
 async function handleUpdatePoints(data) {
   try {
     // Validate input structure
@@ -605,6 +615,57 @@ function broadcast(lobbyCode, data) {
     console.error('Error broadcasting message:', error);
   }
 }
+
+
+function endGame(lobbyCode) {
+  const lobby = lobbies[lobbyCode];
+  if (!lobby) return;
+
+  // Clear the game timer
+  if (lobby.gameTimer) {
+    clearTimeout(lobby.gameTimer);
+  }
+
+  // Find player with highest score
+  const winner = lobby.players.reduce((highest, player) => {
+    return player.points > (highest?.points || 0) ? player : highest;
+  }, null);
+
+  if (winner) {
+    console.log(`Game ended in lobby ${lobbyCode}. Winner: ${winner.username} with ${winner.points} points`);
+
+    // Broadcast winner information
+    broadcast(lobbyCode, {
+      type: 'game_ended',
+      winner: {
+        username: winner.username,
+        avatar: winner.avatar,
+        points: winner.points
+      },
+      leaderboard: lobby.players.map(player => ({
+        username: player.username,
+        avatar: player.avatar,
+        points: player.points
+      }))
+    });
+  } else {
+    console.log(`Game ended in lobby ${lobbyCode}. No players found.`);
+  }
+
+  // Optionally clean up lobby
+  delete lobbies[lobbyCode];
+}
+
+
+
+
+
+// Start game timer
+const gameDuration = 10 * 60 * 1000; // 10 minutes
+const gameTimer = setTimeout(() => {
+  endGame(lobbyCode);
+}, gameDuration);
+
 
 // Clean up inactive lobbies periodically
 setInterval(() => {
