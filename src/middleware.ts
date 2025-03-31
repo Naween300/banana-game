@@ -13,7 +13,7 @@ const publicRoutes = createRouteMatcher([
   '/sign-in(.*)',
   '/sign-up(.*)',
   '/create-game(.*)',
-  '/sign-up-guest(.*)', // Allow access to guest sign-up page
+  '/sign-up-guest(.*)', 
   '/profile-setup(.*)' // Make profile setup public
 ]);
 
