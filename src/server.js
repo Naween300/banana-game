@@ -250,7 +250,7 @@ function handleJoinLobby(ws, data) {
       isAdmin = lobby.admin.username === username;
       userId = lobby.players[existingPlayerIndex].userId;
     } else {
-      
+      // New player ############################
       const newPlayer = { 
         ws,
         userId: uuidv4(),
@@ -429,7 +429,7 @@ async function handleUpdatePoints(data) {
     player.points = (player.points || 0) + points;
     console.log(`Updated points for ${player.username}: ${player.points}`);
 
-    // Redis transaction setup
+    // Redis transaction setup ##############################################################
     const scoreKey = `leaderboard:${lobbyCode}`;
     const hourlyKey = `${scoreKey}:hourly:${Math.floor(Date.now()/3600000)}`;
     const dailyKey = `${scoreKey}:daily:${Math.floor(Date.now()/86400000)}`;

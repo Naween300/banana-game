@@ -1,9 +1,6 @@
 import axios from 'axios';
 
-/**
- * Fetches a random avatar from DiceBear API
- * @returns Promise resolving to SVG avatar data URL
- */
+
 export async function fetchRandomAvatar(): Promise<string> {
   try {
     // Generate a random seed for the avatar
