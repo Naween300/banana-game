@@ -95,7 +95,7 @@ export default function GamePage() {
       if (socket && socket.readyState === WebSocket.OPEN && myUserId) {
         socket.send(JSON.stringify({
           type: "update_points",
-          userId: myUserId, // Use stored userId instead of username
+          userId: myUserId, 
           lobbyCode,
           points: points
         }));
@@ -111,7 +111,7 @@ export default function GamePage() {
     }, 2000);
   };
 
-  // Initialize WebSocket with reconnection logic
+  
   useEffect(() => {
     let reconnectAttempts = 0;
     const maxReconnectAttempts = 5;
@@ -147,7 +147,7 @@ export default function GamePage() {
           console.log("Received message:", data);
           
           if (data.type === "joined_game") {
-            // Store the userId assigned by the server
+            
             setMyUserId(data.userId);
             console.log(`Received userId from server: ${data.userId}`);
           } else if (data.type === "leaderboard_update") {
@@ -157,7 +157,7 @@ export default function GamePage() {
             console.error("Server error:", data.message);
           }
           else if (data.type === "game_ended") {
-            // Handle game ended message
+            
             const { winner, leaderboard } = data;
             setGameEnded(true);
             setWinner(winner);
@@ -177,7 +177,7 @@ export default function GamePage() {
           reconnectAttempts++;
           console.log(`Attempting to reconnect (${reconnectAttempts}/${maxReconnectAttempts})...`);
           
-          // Exponential backoff for reconnection attempts
+          
           const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000);
           reconnectTimer = setTimeout(connectWebSocket, delay);
         } else {
@@ -203,12 +203,12 @@ export default function GamePage() {
     };
   }, [lobbyCode, username, avatar]);
 
-  // Load initial puzzle
+  
   useEffect(() => {
     loadPuzzle();
   }, []);
 
-  // Timer effect
+  
 useEffect(() => {
   if (loading || selectedAnswer !== null || timeLeft <= 0 || gameEnded) return;
 
@@ -232,7 +232,7 @@ useEffect(() => {
 
   return (
     <div className="flex min-h-screen">
-      {/* Main Game Section */}
+      
       <div className="flex-grow bg-gradient-to-b from-yellow-500 to-orange-500 p-8">
         <div className="max-w-4xl mx-auto">
           <div className="flex justify-between items-center mb-6">
@@ -252,7 +252,7 @@ useEffect(() => {
               </div>
               
               
-              {/* Connection status indicator */}
+             
               <div className={`h-3 w-3 rounded-full ${
                 connectionStatus === 'connected' ? 'bg-green-500' : 
                 connectionStatus === 'connecting' ? 'bg-yellow-500 animate-pulse' : 
@@ -329,7 +329,7 @@ useEffect(() => {
         </div>
       </div>
 
-      {/* Leaderboard Sidebar */}
+      
       <div className="w-96 bg-white/20 backdrop-blur-lg p-6 border-l border-white/30">
         <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-2">
           <span>🏆</span> Live Leaderboard
@@ -384,7 +384,7 @@ useEffect(() => {
           </div>
         )}
       </div>
-      {/* Game Over Modal */}
+      
 {gameEnded && (
   <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
     <div className="bg-gradient-to-b from-purple-600 to-pink-500 rounded-3xl p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto">

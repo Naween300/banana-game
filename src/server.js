@@ -5,9 +5,9 @@ const http = require('http');
 const Redis = require('ioredis');
 const redis = new Redis(process.env.REDIS_URL);
 
-// Create HTTP server with proper CORS headers
+
 const server = http.createServer((req, res) => {
-  // Handle preflight requests
+
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
@@ -27,22 +27,22 @@ const server = http.createServer((req, res) => {
   res.end('WebSocket server is running');
 });
 
-// Create WebSocket server with explicit options
+
 const wss = new WebSocket.Server({ 
   server,
   perMessageDeflate: false,
   clientTracking: true
 });
 
-// Store lobbies with their codes
+
 const lobbies = {};
 
-// Generate a random 5-digit code
+
 function generateLobbyCode() {
   return Math.floor(10000 + Math.random() * 90000).toString();
 }
 
-// Leaderboard caching and rate limiting
+
 const leaderboardCache = new Map();
 const rateLimiter = new Map();
 
@@ -52,15 +52,15 @@ wss.on('error', (error) => {
 
 wss.on('connection', (ws, req) => {
   console.log('New client connected from:', req.socket.remoteAddress);
-  ws.id = uuidv4(); // Assign unique ID to each connection
-  ws.isAlive = true; // For connection monitoring
+  ws.id = uuidv4(); 
+  ws.isAlive = true; 
 
-  // Handle pong responses
+  
   ws.on('pong', () => {
     ws.isAlive = true;
   });
 
-  // Interval to check client connections
+  
   const interval = setInterval(() => {
     if (!ws.isAlive) {
       console.log('Terminating inactive connection');
@@ -73,7 +73,7 @@ wss.on('connection', (ws, req) => {
 
   ws.on('message', (message) => {
     try {
-      // Handle binary message if needed
+      
       const messageStr = message instanceof Buffer ? message.toString() : message;
       const data = JSON.parse(messageStr);
       console.log('Received message:', data);
@@ -99,7 +99,7 @@ wss.on('connection', (ws, req) => {
       }
     } catch (error) {
       console.error('Error processing message:', error);
-      // Send error back to client
+     
       try {
         ws.send(JSON.stringify({
           type: 'error',
@@ -111,28 +111,28 @@ wss.on('connection', (ws, req) => {
     }
   });
 
-  // Handle connection close
+  
   ws.on('close', (code, reason) => {
     clearInterval(interval);
     console.log(`Client disconnected. Code: ${code}, Reason: ${reason || 'No reason provided'}`);
     
-    // Remove player from all lobbies
+    
     for (const lobbyCode in lobbies) {
       const lobby = lobbies[lobbyCode];
       const previousPlayerCount = lobby.players.length;
   
-      // Remove the disconnected player
+      
       lobby.players = lobby.players.filter(player => player.ws.id !== ws.id);
   
       if (previousPlayerCount > lobby.players.length) {
-        // If admin left, assign a new admin or delete the lobby
-        // If admin left, assign a new admin or delete the lobby
+        
+        
 if (lobby.admin.ws.id === ws.id) {
   if (lobby.players.length > 0) {
     lobby.admin = lobby.players[0];
     console.log(`New admin assigned in lobby ${lobbyCode}: ${lobby.admin.username}`);
   } else if (!lobby.gameInProgress) {
-    // Only delete the lobby if the game is not in progress
+   
     console.log(`Deleting empty lobby ${lobbyCode}`);
     delete lobbies[lobbyCode];
     continue;
@@ -147,7 +147,7 @@ if (lobby.admin.ws.id === ws.id) {
     }
   });
 
-  // Handle connection errors
+ 
   ws.on('error', (error) => {
     console.error('WebSocket connection error:', error);
   });
@@ -168,7 +168,7 @@ function handleCreateLobby(ws, data) {
     const domain = process.env.APP_DOMAIN || 'localhost:3000';
     const joinUrl = `http://${domain}/game?code=${lobbyCode}&name=${encodeURIComponent(player.username)}&avatar=${encodeURIComponent(player.avatar)}`;
 
-    // Create lobby entry
+    
     lobbies[lobbyCode] = {
       code: lobbyCode,
       admin: player,
@@ -213,7 +213,7 @@ function handleJoinLobby(ws, data) {
   try {
     const { lobbyCode, username, avatar } = data;
     
-    // Check if lobby exists
+   
     if (!lobbies[lobbyCode]) {
       ws.send(JSON.stringify({
         type: 'error',
@@ -224,7 +224,7 @@ function handleJoinLobby(ws, data) {
     
     const lobby = lobbies[lobbyCode];
     
-    // Check if game is already in progress
+    
     if (lobby.gameInProgress) {
       ws.send(JSON.stringify({
         type: 'error',
@@ -233,7 +233,7 @@ function handleJoinLobby(ws, data) {
       return;
     }
     
-    // Check if player already exists
+    
     const existingPlayerIndex = lobby.players.findIndex(
       p => p.username === username
     );
@@ -242,15 +242,15 @@ function handleJoinLobby(ws, data) {
     let userId = '';
     
     if (existingPlayerIndex !== -1) {
-      // Update existing player's connection
+      
       lobby.players[existingPlayerIndex].ws = ws;
       lobby.players[existingPlayerIndex].avatar = avatar || lobby.players[existingPlayerIndex].avatar;
       
-      // Check if this player is the admin
+      
       isAdmin = lobby.admin.username === username;
       userId = lobby.players[existingPlayerIndex].userId;
     } else {
-      // Add new player
+      // New player ############################
       const newPlayer = { 
         ws,
         userId: uuidv4(),
@@ -261,19 +261,19 @@ function handleJoinLobby(ws, data) {
       };
       lobby.players.push(newPlayer);
       
-      // Check if this player is the admin
+      
       isAdmin = lobby.admin.username === username;
       userId = newPlayer.userId;
     }
     
     console.log(`Player joined lobby ${lobbyCode}: ${username} (isAdmin: ${isAdmin}, userId: ${userId})`);
     
-    // Tell the player if they're admin
+    
     ws.send(JSON.stringify({
       type: 'joined_lobby',
       lobbyCode,
       isAdmin,
-      userId // Send userId to client
+      userId 
     }));
     
     broadcastLobbyUpdate(lobbyCode);
@@ -293,7 +293,7 @@ function handleJoinGame(ws, data) {
     console.log(`Attempting to join game with code: ${lobbyCode}`);
     console.log(`Available lobbies: ${Object.keys(lobbies).join(', ')}`);
     
-    // Check if lobby exists
+    
     if (!lobbies[lobbyCode]) {
       console.log(`Lobby ${lobbyCode} not found in available lobbies`);
       ws.send(JSON.stringify({
@@ -305,7 +305,7 @@ function handleJoinGame(ws, data) {
     
     const lobby = lobbies[lobbyCode];
     
-    // Find existing player by username
+    
     const existingPlayerIndex = lobby.players.findIndex(
       p => p.username === username
     );
@@ -313,12 +313,12 @@ function handleJoinGame(ws, data) {
     let userId = '';
     
     if (existingPlayerIndex !== -1) {
-      // Update existing player's connection
+      
       lobby.players[existingPlayerIndex].ws = ws;
-      ws.id = lobby.players[existingPlayerIndex].userId; // Preserve the user ID
+      ws.id = lobby.players[existingPlayerIndex].userId; 
       userId = lobby.players[existingPlayerIndex].userId;
     } else {
-      // Add new player
+     
       userId = uuidv4();
       const newPlayer = { 
         ws,
@@ -429,7 +429,7 @@ async function handleUpdatePoints(data) {
     player.points = (player.points || 0) + points;
     console.log(`Updated points for ${player.username}: ${player.points}`);
 
-    // Redis transaction setup
+    // Redis transaction setup ##############################################################
     const scoreKey = `leaderboard:${lobbyCode}`;
     const hourlyKey = `${scoreKey}:hourly:${Math.floor(Date.now()/3600000)}`;
     const dailyKey = `${scoreKey}:daily:${Math.floor(Date.now()/86400000)}`;
@@ -512,7 +512,7 @@ async function handleUpdatePoints(data) {
   }
 }
 
-// Helper function
+
 function processLeaderboard(data, lobby) {
   const result = [];
   for (let i = 0; i < data.length; i += 2) {
@@ -621,7 +621,7 @@ function endGame(lobbyCode) {
   const lobby = lobbies[lobbyCode];
   if (!lobby) return;
 
-  // Clear the game timer
+  
   if (lobby.gameTimer) {
     clearTimeout(lobby.gameTimer);
   }
@@ -634,7 +634,7 @@ function endGame(lobbyCode) {
   if (winner) {
     console.log(`Game ended in lobby ${lobbyCode}. Winner: ${winner.username} with ${winner.points} points`);
 
-    // Broadcast winner information
+    
     broadcast(lobbyCode, {
       type: 'game_ended',
       winner: {
@@ -652,7 +652,7 @@ function endGame(lobbyCode) {
     console.log(`Game ended in lobby ${lobbyCode}. No players found.`);
   }
 
-  // Optionally clean up lobby
+  
   delete lobbies[lobbyCode];
 }
 
@@ -660,34 +660,34 @@ function endGame(lobbyCode) {
 
 
 
-// Start game timer
+
 const gameDuration = 10 * 60 * 1000; // 10 minutes
 const gameTimer = setTimeout(() => {
   endGame(lobbyCode);
 }, gameDuration);
 
 
-// Clean up inactive lobbies periodically
+
 setInterval(() => {
   const now = new Date();
   for (const lobbyCode in lobbies) {
     const lobby = lobbies[lobbyCode];
-    // Remove lobbies older than 3 hours
+   
     if (now - lobby.createdAt > 3 * 60 * 60 * 1000) {
       console.log(`Removing inactive lobby ${lobbyCode}`);
       delete lobbies[lobbyCode];
     }
   }
-}, 60 * 60 * 1000); // Check every hour
+}, 60 * 60 * 1000); 
 
-// Start the server
+
 const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => {
   console.log(`WebSocket server running on ws://localhost:${PORT}`);
   console.log(`HTTP server running on http://localhost:${PORT}`);
 });
 
-// Handle server shutdown gracefully
+
 process.on('SIGINT', () => {
   console.log('Shutting down server...');
   wss.clients.forEach(client => {

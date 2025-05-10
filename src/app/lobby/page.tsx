@@ -37,7 +37,7 @@ export default function LobbyPage() {
       console.log("Connected to WebSocket server");
       setIsConnecting(false);
       
-      // If we have a code in URL, join that lobby
+      
       if (joinCode) {
         newSocket.send(
           JSON.stringify({
@@ -48,7 +48,7 @@ export default function LobbyPage() {
           })
         );
       } else {
-        // Otherwise create a new lobby
+       
         newSocket.send(
           JSON.stringify({
             type: "create_lobby",
@@ -67,7 +67,7 @@ export default function LobbyPage() {
         case "lobby_created":
   setLobbyCode(data.lobbyCode);
   setQrCode(data.qrCode);
-  setIsAdmin(true); // Explicitly set to true for lobby creator
+  setIsAdmin(true); 
   console.log("Set isAdmin to true for lobby creator");
   break;
 
@@ -184,7 +184,7 @@ export default function LobbyPage() {
           
           {lobbyCode && (
             <>
-              <div className="mb-6">
+              <div className="mb-6 mb-6 flex flex-col items-center justify-center">
                 <h3 className="text-xl font-bold text-white mb-2">Scan to join</h3>
                 <div className="bg-white p-4 rounded-lg inline-block mx-auto">
                   {qrCode ? (
@@ -197,9 +197,9 @@ export default function LobbyPage() {
               </div>
               
               <div className="mb-6">
-                <h3 className="text-xl font-bold text-white mb-2">Join by Pin</h3>
+                
                 <div className="text-center">
-                  <p className="text-gray-200 mb-2">Go to bananapuzzle.app</p>
+                  <p className="text-gray-200 mb-2">banana puzzle lobby code</p>
                   <p className="text-5xl font-bold text-yellow-300">{lobbyCode}</p>
                 </div>
               </div>

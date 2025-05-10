@@ -7,20 +7,19 @@ import { useAuth } from "@clerk/nextjs";
 export default function JoinPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const code = searchParams.get("code"); // Extract the game code from the URL
+  const code = searchParams.get("code"); 
   const { isLoaded } = useAuth();
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isLoaded) return; // Wait for Clerk to load
+    if (!isLoaded) return; 
 
     try {
       if (code) {
-        // Skip authentication for guest users with a code
-        // Proceed directly to profile setup with the game code
+        
         router.push(`/profile-setup?code=${code}`);
       } else {
-        // If no game code is provided, redirect to home
+       
         router.push("/");
       }
     } catch (error) {
